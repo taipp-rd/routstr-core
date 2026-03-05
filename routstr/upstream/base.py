@@ -277,7 +277,9 @@ class BaseUpstreamProvider:
 
         try:
             data = json.loads(body)
-            if isinstance(data, dict) and "model" in data:
+            if not isinstance(data, dict):
+                return body
+            if "model" in data:
                 original_model = model_obj.id
                 transformed_model = self.transform_model_name(original_model)
                 data["model"] = transformed_model
@@ -289,7 +291,21 @@ class BaseUpstreamProvider:
                         "provider": self.provider_type or self.base_url,
                     },
                 )
-                return json.dumps(data).encode()
+            # Strip web_search tools/choice: OpenAI Chat Completions only supports
+            # "function" and "custom"; clients may send "web_search" and get 400.
+            if "tools" in data and isinstance(data["tools"], list):
+                data["tools"] = [
+                    t for t in data["tools"] if t.get("type") != "web_search"
+                ]
+                if not data["tools"]:
+                    del data["tools"]
+                    if data.get("tool_choice") == "web_search":
+                        data["tool_choice"] = "none"
+                elif data.get("tool_choice") == "web_search":
+                    data["tool_choice"] = "auto"
+            elif data.get("tool_choice") == "web_search":
+                data["tool_choice"] = "none"
+            return json.dumps(data).encode()
         except Exception as e:
             logger.debug(
                 "Could not transform request body",
@@ -2943,6 +2959,17 @@ class BaseUpstreamProvider:
 
             return found_models
 
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "Error fetching models: upstream API returned error status",
+                extra={
+                    "provider": self.provider_type or self.base_url,
+                    "status_code": e.response.status_code,
+                    "url": str(e.request.url),
+                    "error": str(e),
+                },
+            )
+            return []
         except Exception as e:
             logger.error(
                 f"Error fetching models for {self.provider_type or self.base_url}",
