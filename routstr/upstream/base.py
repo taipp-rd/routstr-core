@@ -2960,10 +2960,16 @@ class BaseUpstreamProvider:
             return found_models
 
         except httpx.HTTPStatusError as e:
+            provider = self.provider_type or self.base_url
             logger.error(
-                "Error fetching models: upstream API returned error status",
+                "Error fetching models: upstream API returned error status "
+                "(provider=%s, status_code=%s, url=%s): %s",
+                provider,
+                e.response.status_code,
+                e.request.url,
+                e,
                 extra={
-                    "provider": self.provider_type or self.base_url,
+                    "provider": provider,
                     "status_code": e.response.status_code,
                     "url": str(e.request.url),
                     "error": str(e),
