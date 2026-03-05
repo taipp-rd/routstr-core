@@ -39,7 +39,8 @@ async def recieve_token(
         raise ValueError("Multiple keysets per token currently not supported")
 
     mint_url = normalize_mint_url(token_obj.mint)
-    wallet = await get_wallet(mint_url, token_obj.unit, load=False)
+    # load=True so the wallet fetches keysets from the mint; required for verify_proofs_dleq
+    wallet = await get_wallet(mint_url, token_obj.unit, load=True)
     wallet.keyset_id = token_obj.keysets[0]
 
     normalized_mints = [normalize_mint_url(m) for m in settings.cashu_mints]
@@ -185,7 +186,8 @@ def normalize_mint_url(url: str) -> str:
 
     if not url or not url.strip():
         return url
-    u = url.strip()
+    # Remove accidental quotes (dashboard may store "https://mint.../Bitcoin")
+    u = url.strip().strip('"').strip("'")
     if not (u.startswith("http://") or u.startswith("https://")):
         u = "https://" + u
     parsed = urlparse(u)
