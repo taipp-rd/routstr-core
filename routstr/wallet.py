@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import math
 from typing import TypedDict
 
@@ -171,13 +172,25 @@ async def credit_balance(
 _wallets: dict[str, Wallet] = {}
 
 
+def _wallet_db_path(mint_url: str, unit: str) -> str:
+    """Return a unique DB path per mint+unit so each wallet has its own SQLite file.
+
+    Cashu's migration is not idempotent; using one shared db='.wallet' for all
+    mints/units causes duplicate column errors when multiple wallets are opened.
+    One DB per (mint_url, unit) ensures migration runs only once per file.
+    """
+    safe = hashlib.sha256(mint_url.encode()).hexdigest()[:16]
+    return f".wallet/{safe}_{unit}"
+
+
 async def get_wallet(mint_url: str, unit: str = "sat", load: bool = True) -> Wallet:
     global _wallets
     id = f"{mint_url}_{unit}"
     if id not in _wallets:
         async with _get_wallet_lock():
             if id not in _wallets:
-                _wallets[id] = await Wallet.with_db(mint_url, db=".wallet", unit=unit)
+                db_path = _wallet_db_path(mint_url, unit)
+                _wallets[id] = await Wallet.with_db(mint_url, db=db_path, unit=unit)
 
     if load:
         await _wallets[id].load_mint()
