@@ -253,16 +253,18 @@ async def fetch_all_balances(
     if units is None:
         units = ["sat", "msat"]
 
-    async def fetch_balance(
-        session: db.AsyncSession, mint_url: str, unit: str
-    ) -> BalanceDetail:
+    async def fetch_balance(mint_url: str, unit: str) -> BalanceDetail:
+        """Fetch balance for one mint+unit. Uses its own DB session to allow concurrent execution."""
         try:
             wallet = await get_wallet(mint_url, unit)
             proofs = get_proofs_per_mint_and_unit(
                 wallet, mint_url, unit, not_reserved=True
             )
             proofs = await slow_filter_spend_proofs(proofs, wallet)
-            user_balance = await db.balances_for_mint_and_unit(session, mint_url, unit)
+            async with db.create_session() as session:
+                user_balance = await db.balances_for_mint_and_unit(
+                    session, mint_url, unit
+                )
             if unit == "sat":
                 user_balance = user_balance // 1000
             proofs_balance = sum(proof.amount for proof in proofs)
@@ -298,16 +300,15 @@ async def fetch_all_balances(
             }
             return error_result
 
-    # Create tasks for all mint/unit combinations
-    async with db.create_session() as session:
-        tasks = [
-            fetch_balance(session, mint_url, unit)
-            for mint_url in settings.cashu_mints
-            for unit in units
-        ]
+    # Create tasks for all mint/unit combinations (each task uses its own session)
+    tasks = [
+        fetch_balance(mint_url, unit)
+        for mint_url in settings.cashu_mints
+        for unit in units
+    ]
 
-        # Run all tasks concurrently
-        balance_details = list(await asyncio.gather(*tasks))
+    # Run all tasks concurrently
+    balance_details = list(await asyncio.gather(*tasks))
 
     # Calculate totals
     total_wallet_balance_sats = 0
