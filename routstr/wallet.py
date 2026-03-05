@@ -13,6 +13,17 @@ from .payment.lnurl import raw_send_to_lnurl
 
 logger = get_logger(__name__)
 
+# Serialize wallet opening to avoid Cashu migrations running concurrently
+# and causing "duplicate column" (migration not idempotent).
+_wallet_open_lock: asyncio.Lock | None = None
+
+
+def _get_wallet_lock() -> asyncio.Lock:
+    global _wallet_open_lock
+    if _wallet_open_lock is None:
+        _wallet_open_lock = asyncio.Lock()
+    return _wallet_open_lock
+
 
 async def get_balance(unit: str) -> int:
     wallet = await get_wallet(settings.primary_mint, unit)
@@ -164,7 +175,9 @@ async def get_wallet(mint_url: str, unit: str = "sat", load: bool = True) -> Wal
     global _wallets
     id = f"{mint_url}_{unit}"
     if id not in _wallets:
-        _wallets[id] = await Wallet.with_db(mint_url, db=".wallet", unit=unit)
+        async with _get_wallet_lock():
+            if id not in _wallets:
+                _wallets[id] = await Wallet.with_db(mint_url, db=".wallet", unit=unit)
 
     if load:
         await _wallets[id].load_mint()
@@ -250,7 +263,18 @@ async def fetch_all_balances(
             }
             return result
         except Exception as e:
-            logger.error(f"Error getting balance for {mint_url} {unit}: {e}")
+            # Cashu migration can raise duplicate column when opening multiple
+            # wallets; log at debug to avoid noise, still return zero balance.
+            is_duplicate_column = "duplicate column" in str(e).lower()
+            if is_duplicate_column:
+                logger.debug(
+                    "Balance skipped (Cashu migration conflict) for %s %s: %s",
+                    mint_url,
+                    unit,
+                    e,
+                )
+            else:
+                logger.error(f"Error getting balance for {mint_url} {unit}: {e}")
             error_result: BalanceDetail = {
                 "mint_url": mint_url,
                 "unit": unit,
