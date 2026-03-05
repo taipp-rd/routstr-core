@@ -2,6 +2,7 @@ import hashlib
 import math
 from typing import Optional
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, update
@@ -254,6 +255,29 @@ async def validate_bearer_key(
                     else bearer_key,
                 },
             )
+            # ConnectError / DNS failure: mint hostname not resolvable (e.g. Docker default DNS)
+            err_msg = str(e).lower()
+            is_connect_error = isinstance(e, httpx.ConnectError) or (
+                "does not resolve" in err_msg
+                or "name or service not known" in err_msg
+                or "[errno -2]" in err_msg
+                or "nodename nor servname" in err_msg
+            )
+            if is_connect_error:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": {
+                            "message": (
+                                "Mint unreachable (DNS or network). The node could not resolve "
+                                "the token's mint hostname. If running in Docker, try: "
+                                "docker run ... --dns 8.8.8.8 --dns 8.8.4.4"
+                            ),
+                            "type": "service_unavailable",
+                            "code": "mint_unreachable",
+                        }
+                    },
+                )
             raise HTTPException(
                 status_code=401,
                 detail={
