@@ -175,16 +175,23 @@ _wallets: dict[str, Wallet] = {}
 
 
 def normalize_mint_url(url: str) -> str:
-    """Ensure mint URL has a scheme so HTTP clients do not raise 'missing protocol'.
+    """Ensure mint URL has a scheme and no path (HTTP base only).
 
-    Cashu tokens and config may store mint as host only (e.g. mint.example.com).
+    Cashu tokens may include path (e.g. https://mint.minibits.cash/Bitcoin). The
+    Cashu wallet uses this as the HTTP base; if the path is included, the client
+    may resolve hostname incorrectly (e.g. mint.minibits.cash/Bitcoin) and fail DNS.
     """
+    from urllib.parse import urlparse, urlunparse
+
     if not url or not url.strip():
         return url
     u = url.strip()
-    if u.startswith("http://") or u.startswith("https://"):
-        return u
-    return "https://" + u
+    if not (u.startswith("http://") or u.startswith("https://")):
+        u = "https://" + u
+    parsed = urlparse(u)
+    # Keep only scheme + netloc (no path, query, fragment)
+    base = urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
+    return base or u
 
 
 def _wallet_db_path(mint_url: str, unit: str) -> str:
