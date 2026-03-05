@@ -38,15 +38,17 @@ async def recieve_token(
     if len(token_obj.keysets) > 1:
         raise ValueError("Multiple keysets per token currently not supported")
 
-    wallet = await get_wallet(token_obj.mint, token_obj.unit, load=False)
+    mint_url = normalize_mint_url(token_obj.mint)
+    wallet = await get_wallet(mint_url, token_obj.unit, load=False)
     wallet.keyset_id = token_obj.keysets[0]
 
-    if token_obj.mint not in settings.cashu_mints:
+    normalized_mints = [normalize_mint_url(m) for m in settings.cashu_mints]
+    if mint_url not in normalized_mints:
         return await swap_to_primary_mint(token_obj, wallet)
 
     wallet.verify_proofs_dleq(token_obj.proofs)
     await wallet.split(proofs=token_obj.proofs, amount=0, include_fees=True)
-    return token_obj.amount, token_obj.unit, token_obj.mint
+    return token_obj.amount, token_obj.unit, mint_url
 
 
 async def send(amount: int, unit: str, mint_url: str | None = None) -> tuple[int, str]:
@@ -172,6 +174,19 @@ async def credit_balance(
 _wallets: dict[str, Wallet] = {}
 
 
+def normalize_mint_url(url: str) -> str:
+    """Ensure mint URL has a scheme so HTTP clients do not raise 'missing protocol'.
+
+    Cashu tokens and config may store mint as host only (e.g. mint.example.com).
+    """
+    if not url or not url.strip():
+        return url
+    u = url.strip()
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    return "https://" + u
+
+
 def _wallet_db_path(mint_url: str, unit: str) -> str:
     """Return a unique DB path per mint+unit so each wallet has its own SQLite file.
 
@@ -185,6 +200,7 @@ def _wallet_db_path(mint_url: str, unit: str) -> str:
 
 async def get_wallet(mint_url: str, unit: str = "sat", load: bool = True) -> Wallet:
     global _wallets
+    mint_url = normalize_mint_url(mint_url)
     id = f"{mint_url}_{unit}"
     if id not in _wallets:
         async with _get_wallet_lock():

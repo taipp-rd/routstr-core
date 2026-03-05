@@ -15,7 +15,7 @@ from .payment.cost_calculation import (
     MaxCostData,
     calculate_cost,
 )
-from .wallet import credit_balance, deserialize_token_from_string
+from .wallet import credit_balance, deserialize_token_from_string, normalize_mint_url
 
 logger = get_logger(__name__)
 
@@ -162,12 +162,13 @@ async def validate_bearer_key(
                     "has_expiry_time": bool(key_expiry_time),
                 },
             )
-            if token_obj.mint in settings.cashu_mints:
+            normalized_mint = normalize_mint_url(token_obj.mint)
+            if normalized_mint in [normalize_mint_url(m) for m in settings.cashu_mints]:
                 refund_currency = token_obj.unit
-                refund_mint_url = token_obj.mint
+                refund_mint_url = normalized_mint
             else:
                 refund_currency = "sat"
-                refund_mint_url = settings.primary_mint
+                refund_mint_url = normalize_mint_url(settings.primary_mint)
 
             new_key = ApiKey(
                 hashed_key=hashed_key,
