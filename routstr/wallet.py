@@ -215,7 +215,18 @@ async def get_wallet(mint_url: str, unit: str = "sat", load: bool = True) -> Wal
         async with _get_wallet_lock():
             if id not in _wallets:
                 db_path = _wallet_db_path(mint_url, unit)
-                _wallets[id] = await Wallet.with_db(mint_url, db=db_path, unit=unit)
+                try:
+                    _wallets[id] = await Wallet.with_db(
+                        mint_url,
+                        db=db_path,
+                        unit=unit,
+                        load_all_keysets=True,
+                    )
+                except TypeError:
+                    # Older cashu may not support load_all_keysets
+                    _wallets[id] = await Wallet.with_db(
+                        mint_url, db=db_path, unit=unit
+                    )
 
     if load:
         await _wallets[id].load_mint()
